@@ -1,5 +1,7 @@
 ### A Live Demo of [Join Monster](https://github.com/stems/join-monster)
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/stems/join-monster-demo.svg)](https://greenkeeper.io/)
+
 [https://join-monster.herokuapp.com/graphql](https://join-monster.herokuapp.com/graphql)
 
 
