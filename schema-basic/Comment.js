@@ -2,29 +2,33 @@ import {
   GraphQLObjectType,
   GraphQLList,
   GraphQLString,
-  GraphQLInt,
-  GraphQLBoolean
+  GraphQLBoolean,
+  GraphQLInt
 } from 'graphql'
 
-import Post from './Post'
-import User from './User'
-import Authored from './Authored'
+import {
+  globalIdField,
+  connectionDefinitions
+} from 'graphql-relay'
 
-export default new GraphQLObjectType({
+import { Post } from './Post'
+import User from './User'
+import { nodeInterface } from './Node'
+
+export const Comment = new GraphQLObjectType({
   description: 'Comments on posts',
   name: 'Comment',
-  // another SQL table to map to
   sqlTable: 'comments',
   uniqueKey: 'id',
-  interfaces: () => [ Authored ],
+  // also implements the node interface
+  interfaces: [ nodeInterface ],
   fields: () => ({
     id: {
-      // assumed SQL column to be "id"
-      type: GraphQLInt
+      ...globalIdField(),
+      sqlDeps: [ 'id' ]
     },
     body: {
       description: 'The content of the comment',
-      // assumed to be "body"
       type: GraphQLString
     },
     likers: {
@@ -40,27 +44,16 @@ export default new GraphQLObjectType({
     },
     post: {
       description: 'The post that the comment belongs to',
-      // a back reference to its Post
       type: Post,
-      // how to join these tables
       sqlJoin: (commentTable, postTable) => `${commentTable}.post_id = ${postTable}.id`
     },
     author: {
       description: 'The user who wrote the comment',
-      // and one to its User
       type: User,
       sqlJoin: (commentTable, userTable) => `${commentTable}.author_id = ${userTable}.id`
     },
-    authorId: {
-      type: GraphQLInt,
-      sqlcolumn: 'author_id'
-    },
     archived: {
       type: GraphQLBoolean
-    },
-    postId: {
-      type: GraphQLInt,
-      sqlColumn: 'post_id'
     },
     createdAt: {
       type: GraphQLString,
@@ -68,3 +61,44 @@ export default new GraphQLObjectType({
     }
   })
 })
+
+export const SimpleComment = new GraphQLObjectType({
+  description: 'comments on the post without join capabilities',
+  name: 'SimpleComment',
+  fields: () => ({
+    id: {
+      ...globalIdField(),
+      sqlDeps: [ 'id' ]
+    },
+    body: {
+      type: GraphQLString
+    },
+    authorId: {
+      type: GraphQLInt,
+      resolve: comment => comment.author_id
+    },
+    postId: {
+      type: GraphQLInt,
+      resolve: comment => comment.post_id
+    },
+    archived: {
+      type: GraphQLBoolean
+    },
+    createdAt: {
+      type: GraphQLString,
+      resolve: comment => comment.created_at
+    }
+  })
+})
+
+// create a connection type from the Comment type
+// this connection will also include a "total" so we know how many total comments there are
+// this could be used to calculate page numbers
+const { connectionType: CommentConnection } = connectionDefinitions({
+  nodeType: Comment,
+  connectionFields: {
+    total: { type: GraphQLInt }
+  }
+})
+
+export { CommentConnection }

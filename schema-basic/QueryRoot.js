@@ -1,16 +1,17 @@
 import {
   GraphQLObjectType,
-  GraphQLList,
-  GraphQLNonNull,
   GraphQLString,
   GraphQLInt
 } from 'graphql'
 
-
 import joinMonster from 'join-monster'
+
 import knex from './database'
-import dbCall from '../data/fetch'
 import User from './User'
+import { nodeField } from './Node'
+import dbCall from '../data/fetch'
+
+const options = { dialect: 'pg' }
 
 export default new GraphQLObjectType({
   description: 'global query object',
@@ -20,27 +21,24 @@ export default new GraphQLObjectType({
       type: GraphQLString,
       resolve: () => joinMonster.version
     },
-    users: {
-      type: new GraphQLList(User),
-      resolve: (parent, args, context, resolveInfo) => {
-        // joinMonster with handle batching all the data fetching for the users and it's children. Determines everything it needs to from the "resolveInfo", which includes the parsed GraphQL query AST and your schema definition
-        return joinMonster(resolveInfo, context, sql => dbCall(sql, knex, context))
-      }
-    },
+    // implement the Node type from Relay spec
+    node: nodeField,
     user: {
       type: User,
       args: {
         id: {
           description: 'The users ID number',
-          type: new GraphQLNonNull(GraphQLInt)
+          type: GraphQLInt
         }
       },
-      // this function generates the WHERE condition
       where: (usersTable, args, context) => { // eslint-disable-line no-unused-vars
-        return `${usersTable}.id = ${args.id}`
+        if (args.id) return `${usersTable}.id = ${args.id}`
       },
       resolve: (parent, args, context, resolveInfo) => {
-        return joinMonster(resolveInfo, context, sql => dbCall(sql, knex, context))
+        if (knex.client.config.client !== 'pg') {
+          throw new Error('This schema requires PostgreSQL. A data dump is provided in /data.')
+        }
+        return joinMonster(resolveInfo, context, sql => dbCall(sql, knex, context), options)
       }
     }
   })

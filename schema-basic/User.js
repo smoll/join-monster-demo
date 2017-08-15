@@ -6,70 +6,87 @@ import {
   GraphQLFloat
 } from 'graphql'
 
+import {
+  globalIdField,
+  connectionArgs,
+  forwardConnectionArgs,
+  connectionDefinitions
+} from 'graphql-relay'
+
 import knex from './database'
-import Comment from './Comment'
-import Post from './Post'
-import Authored from './Authored'
+import { PostConnection } from './Post'
+import { CommentConnection } from './Comment'
+import { nodeInterface } from './Node'
+
 
 const User = new GraphQLObjectType({
   description: 'a stem contract account',
   name: 'User',
-  // tell join monster the expression for the table
   sqlTable: 'accounts',
-  // one of the columns must be unique for deduplication purposes
   uniqueKey: 'id',
+  // This implements the node interface
+  interfaces: [ nodeInterface ],
   fields: () => ({
     id: {
-      // no `sqlColumn` and no `resolve`. assumed that the column name is the same as the field name: id
-      type: GraphQLInt
+      description: 'The global ID for the Relay spec',
+      // all the resolver for the globalId needs is the id property
+      ...globalIdField(),
+      sqlDeps: [ 'id' ]
     },
     email: {
       type: GraphQLString,
-      // specify the SQL column
       sqlColumn: 'email_address'
-    },
-    idEncoded: {
-      description: 'The ID base-64 encoded',
-      type: GraphQLString,
-      sqlColumn: 'id',
-      // specifies SQL column and applies a custom resolver
-      resolve: user => toBase64(user.idEncoded)
     },
     fullName: {
       description: 'A user\'s first and last name',
       type: GraphQLString,
-      // depends on multiple SQL columns
       sqlDeps: [ 'first_name', 'last_name' ],
       resolve: user => `${user.first_name} ${user.last_name}`
     },
     fullNameAnotherWay: {
       type: GraphQLString,
-      // or you could use a raw SQL expression
       sqlExpr: table => `${table}.first_name || ' ' || ${table}.last_name`
     },
     posts: {
       description: 'A list of Posts the user has written',
-      // has another GraphQLObjectType as a field
-      type: new GraphQLList(Post),
-      // this is a one-to-many relation
-      // this function tells join monster how to join these tables
-      sqlJoin: (userTable, postTable) => `${userTable}.id = ${postTable}.author_id`,
-      orderBy: 'id'
+      // this is now a connection type
+      type: PostConnection, 
+      // these args navigate through the pages
+      args: connectionArgs,
+      sqlPaginate: true,
+      // use "keyset" pagination, an implementation based on a unique sorting key
+      sortKey: {
+        order: 'desc',
+        key: 'id'
+      },
+      sqlJoin: (userTable, postTable) => `${userTable}.id = ${postTable}.author_id`
     },
     comments: {
       description: 'Comments the user has written on people\'s posts',
-      // another one-to-many relation
-      type: new GraphQLList(Comment),
-      // only JOIN comments that are not archived
-      sqlJoin: (userTable, commentTable) => `${userTable}.id = ${commentTable}.author_id AND ${commentTable}.archived = (0 = 1)`,
-      orderBy: { id: 'DESC' }
+      type: CommentConnection,
+      // this implementation only allows "forward pagination"
+      args: forwardConnectionArgs,
+      sqlPaginate: true,
+      // this time use "offset pagination", an implementation based on LIMIT/OFFSET
+      orderBy: {
+        id: 'desc'
+      },
+      // join is the same as before
+      sqlJoin: (userTable, commentTable) => `${userTable}.id = ${commentTable}.author_id AND ${commentTable}.archived = FALSE`
     },
     following: {
       description: 'Users that this user is following',
-      type: new GraphQLList(User),
-      // many-to-many is supported too, via an intermediate join table
+      type: UserConnection,
+      args: connectionArgs,
+      sqlPaginate: true,
+      // pagination also works with many-to-many
       junction: {
         sqlTable: 'relationships',
+        // the unique sort key can be composite
+        sortKey: {
+          order: 'desc',
+          key: [ 'created_at', 'followee_id' ]
+        },
         sqlJoins: [
           (followerTable, relationTable) => `${followerTable}.id = ${relationTable}.follower_id`,
           (relationTable, followeeTable) => `${relationTable}.followee_id = ${followeeTable}.id`
@@ -81,11 +98,6 @@ const User = new GraphQLObjectType({
       // you can still have resolvers that get data from other sources. simply omit the `sqlColumn` and define a resolver
       resolve: () => [1, 2, 3]
     },
-    numLegs: {
-      description: 'How many legs this user has',
-      type: GraphQLInt,
-      sqlColumn: 'num_legs'
-    },
     // object types without a `sqlTable` are a no-op. Join Monster will ignore it and let you resolve it another way!
     luckyNumber: {
       type: new GraphQLObjectType({
@@ -95,20 +107,13 @@ const User = new GraphQLObjectType({
         }
       }),
       resolve: () => {
-        return knex.raw('SELECT random() AS num').then(num => ({ value: num[0].num }))
+        return knex.raw('SELECT random() AS num').then(num => ({ value: num.rows[0].num }))
       }
-    },
-    writtenMaterial: {
-      // use an interface type
-      type: new GraphQLList(Authored),
-      orderBy: 'id',
-      sqlJoin: (userTable, unionTable) => `${userTable}.id = ${unionTable}.author_id`
     }
   })
 })
 
+const { connectionType: UserConnection } = connectionDefinitions({ nodeType: User })
+
 export default User 
 
-function toBase64(clear) {
-  return Buffer.from(String(clear)).toString('base64')
-}
